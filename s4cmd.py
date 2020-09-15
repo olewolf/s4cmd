@@ -22,6 +22,7 @@ Super S3 command line tool.
 """
 
 import sys, os, re, optparse, multiprocessing, fnmatch, time, hashlib, errno, pytz
+import ntpath, pathlib, random
 import logging, traceback, types, threading, random, socket, shlex, datetime, json
 
 IS_PYTHON2 = sys.version_info[0] == 2
@@ -1073,10 +1074,106 @@ class LocalMD5Cache(object):
         m.update(data)
     return m.hexdigest()
 
+  def get_cache_directory(self):
+    """Get the user's s4cmd cache directory."""
+    # Find the home/.cache/s4cmd diretory.
+    home = str(pathlib.Path.home())
+    cachedir = home + "/.cache/s4cmd"
+    return cachedir
+
+
+  def clean_cache(self, max_number_of_files=10000):
+    """Clean up the cache as appropriate. Oldest files get deleted first."""
+    class cache_file_info:
+      def __init__(self, filename, timestamp):
+        self.filename = filename
+        self.timestamp = timestamp
+
+    # Clean up only by chance.
+    chance = random.randint(0, 100)
+    if chance > 99:
+      cachedir = self.get_cache_directory()
+
+      # Get the total number of files in the list, sorted by age.
+      filelist = []
+      for root, dirs, files in os.walk(cachedir):
+        # Remove empty directories as they are discovered.
+        if len(files) == 0:
+          # The directory may actually contain subdirectories so just attempt
+          # to delete this current directory and accept if it isn't possible.
+          try:
+            to_delete = pathlib.Path(root)
+            to_delete.rmdir()
+          except:
+            pass
+
+        else:
+          for filename in files:
+            filepath = os.path.abspath( os.path.join(root, filename) )
+            timestamp = os.path.getmtime(filepath)
+            filelist.append(cache_file_info(filepath, timestamp))
+
+      # Remove older files.
+      if len(filelist) > max_number_of_files:
+        filelist.sort(key=lambda x: x.timestamp)
+        files_too_many = len(filelist) - max_number_of_files
+        files_to_delete = filelist[:files_too_many]
+        for f in files_to_delete:
+          to_remove = pathlib.Path(f.filename)
+          to_remove.unlink()
+
+
+  def get_md5_from_cache(self, filename):
+    """Read the MD5 hash for the specified file from cache, or generate it."""
+    self.clean_cache()
+    md5_checksum = None
+
+    # Ignore caching if the file is small enough to just recompute the hash.
+    file_size = os.path.getsize(filename)
+    if file_size < 50*1024*1024:
+      md5_checksum = self.file_hash(filename)
+
+    else:
+      # Find the home/.cache/s4cmd diretory.
+      cachedir = self.get_cache_directory()
+      cached_file = cachedir + "/" + os.path.abspath(filename)
+
+      # Read the MD5 checksum from the file.
+      md5_checksum = None
+      cache_dirty = False
+      actual_timestamp = str(os.path.getmtime(filename))
+        
+      try:
+        with open(cached_file, 'rt') as f:
+          # Check the reported file timestamp.
+          reported_timestamp = f.readline()
+          reported_timestamp = reported_timestamp.strip()
+          md5_checksum = f.readline()
+          if actual_timestamp != reported_timestamp:
+            cache_dirty = True
+      except FileNotFoundError:
+        cache_dirty = True
+
+      # Compute and write the checksum if the cache is dirty.
+      if cache_dirty:
+        md5_checksum = self.file_hash(filename)
+        dirs, basename = ntpath.split(cached_file)
+        try:
+          p = pathlib.Path(dirs)
+          p.mkdir(parents = True)
+        except:
+          pass
+        with open(cached_file, 'w') as f:
+          f.writelines([str(actual_timestamp) + "\n", md5_checksum])
+
+    return md5_checksum
+
+
   def get_md5(self):
     '''Get or calculate MD5 value of the local file.'''
     if self.md5 is None:
-      self.md5 = self.file_hash(self.filename)
+      #self.md5 = self.file_hash(self.filename)
+      self.md5 = self.get_md5_from_cache(self.filename)
     return self.md5
 
 class ThreadUtil(S3Handler, ThreadPool.Worker):
