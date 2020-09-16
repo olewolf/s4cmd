@@ -1110,7 +1110,7 @@ class LocalMD5Cache(object):
         else:
           for filename in files:
             filepath = os.path.abspath( os.path.join(root, filename) )
-            timestamp = os.path.getmtime(filepath)
+            timestamp = os.path.getatime(filepath)
             filelist.append(cache_file_info(filepath, timestamp))
 
       # Remove older files.
