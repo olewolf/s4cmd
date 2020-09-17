@@ -1115,12 +1115,25 @@ class LocalMD5Cache(object):
 
       # Remove older files.
       if len(filelist) > max_number_of_files:
-        filelist.sort(key=lambda x: x.timestamp)
         files_too_many = len(filelist) - max_number_of_files
-        files_to_delete = filelist[:files_too_many]
-        for f in files_to_delete:
-          to_remove = pathlib.Path(f.filename)
-          to_remove.unlink()
+
+        # LRU method:
+        #filelist.sort(key=lambda x: x.timestamp)
+        #files_to_delete = filelist[:files_too_many]
+        #for f in files_to_delete:
+        #  to_remove = pathlib.Path(f.filename)
+        #  to_remove.unlink()
+
+        # Random method:
+        files_to_delete = []
+        while len(files_to_delete) < files_too_many:
+          chance = random.randint(0, max_number_of_files - 1)
+          if not chance in files_to_delete:
+            files_to_delete.append(chance)
+          for index in files_to_delete:
+            filename = filelist[index]
+            to_remove = pathlib.Path(f.filename)
+            to_remove.unlink()
 
 
   def get_md5_from_cache(self, filename):
